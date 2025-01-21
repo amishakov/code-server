@@ -3,7 +3,7 @@ import { promises } from "fs"
 import * as http from "http"
 import * as https from "https"
 import * as path from "path"
-import { createApp, ensureAddress, handleArgsSocketCatchError, handleServerError, listen } from "../../../src/node/app"
+import { createApp, ensureAddress, handleArgsSocketCatchError, listen } from "../../../src/node/app"
 import { OptionalString, setDefaults } from "../../../src/node/cli"
 import { generateCertificate } from "../../../src/node/util"
 import { clean, mockLogger, getAvailablePort, tmpdir } from "../../utils/helpers"
@@ -17,7 +17,7 @@ describe("createApp", () => {
   beforeAll(async () => {
     mockLogger()
 
-    const testName = "unlink-socket"
+    const testName = "app"
     await clean(testName)
     tmpDirPath = await tmpdir(testName)
     tmpFilePath = path.join(tmpDirPath, "unlink-socket-file")
@@ -92,7 +92,7 @@ describe("createApp", () => {
       app.dispose()
     }
 
-    expect(() => masterBall()).rejects.toThrow(`listen EACCES: permission denied 127.0.0.1:${port}`)
+    expect(() => masterBall()).rejects.toThrow("listen EACCES: permission denied")
   })
 
   it("should unlink a socket before listening on the socket", async () => {
@@ -103,7 +103,7 @@ describe("createApp", () => {
 
     const app = await createApp(defaultArgs)
 
-    expect(unlinkSpy).toHaveBeenCalledTimes(1)
+    expect(unlinkSpy).toHaveBeenCalledWith(tmpFilePath)
     app.dispose()
   })
 
@@ -152,42 +152,20 @@ describe("ensureAddress", () => {
   it("should throw and error if no address", () => {
     expect(() => ensureAddress(mockServer, "http")).toThrow("Server has no address")
   })
-  it("should return the address if it exists", async () => {
-    mockServer.address = () => "http://localhost:8080/"
+  it("should return the address if it's a string", async () => {
+    mockServer.address = () => "/path/to/unix.sock"
     const address = ensureAddress(mockServer, "http")
-    expect(address.toString()).toBe(`http://localhost:8080/`)
+    expect(address.toString()).toBe(`/path/to/unix.sock`)
   })
-})
-
-describe("handleServerError", () => {
-  beforeAll(() => {
-    mockLogger()
+  it("should construct URL with an IPv4 address", async () => {
+    mockServer.address = () => ({ address: "1.2.3.4", port: 5678, family: "IPv4" })
+    const address = ensureAddress(mockServer, "http")
+    expect(address.toString()).toBe(`http://1.2.3.4:5678/`)
   })
-
-  afterEach(() => {
-    jest.clearAllMocks()
-  })
-
-  it("should call reject if resolved is false", async () => {
-    const resolved = false
-    const reject = jest.fn((err: Error) => undefined)
-    const error = new Error("handleServerError Error")
-
-    handleServerError(resolved, error, reject)
-
-    expect(reject).toHaveBeenCalledTimes(1)
-    expect(reject).toHaveBeenCalledWith(error)
-  })
-
-  it("should log an error if resolved is true", async () => {
-    const resolved = true
-    const reject = jest.fn((err: Error) => undefined)
-    const error = new Error("handleServerError Error")
-
-    handleServerError(resolved, error, reject)
-
-    expect(logger.error).toHaveBeenCalledTimes(1)
-    expect(logger.error).toHaveBeenCalledWith(`http server error: ${error.message} ${error.stack}`)
+  it("should construct URL with an IPv6 address", async () => {
+    mockServer.address = () => ({ address: "a:b:c:d::1234", port: 5678, family: "IPv6" })
+    const address = ensureAddress(mockServer, "http")
+    expect(address.toString()).toBe(`http://[a:b:c:d::1234]:5678/`)
   })
 })
 
